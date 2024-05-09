@@ -1,2 +1,2 @@
 # backlokto-worker
-Workers used by backlokto operator
+Worker used by backlokto operator
