@@ -1,19 +1,17 @@
 package main
 
 import (
-	"flag"
+	"encoding/json"
 	"fmt"
-	"strings"
-
 	"github.com/pibblokto/backlokto-worker/pkg/providers"
-	"github.com/pibblokto/backlokto-worker/pkg/types"
+	"io/ioutil"
+	"os"
 )
 
 var ProvidersMap = map[string]func(map[string]string, []map[string]string){
-	"postgres.pg_dump":         providers.PostgresPgDump,
-	"mysql.mysqldump":          providers.MysqlDump,
+	"postgres.pg_dump": providers.PostgresPgDump,
+	"mysql.mysqldump":  providers.MysqlDump,
 }
-
 
 func parseTargets(filename string) ([]map[string]string, error) {
 	// Read the JSON file
@@ -71,9 +69,9 @@ func main() {
 		fmt.Printf("Error parsing job spec: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Parsed job spec: %v\n", jobSpec)				
+	fmt.Printf("Parsed job spec: %v\n", jobSpec)
 
 	// Running BackupJob
 	ProvidersMap[jobSpec["provider"]](jobSpec, targets)
-	
+
 }

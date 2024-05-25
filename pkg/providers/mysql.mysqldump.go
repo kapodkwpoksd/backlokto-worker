@@ -5,38 +5,48 @@ import (
 	"fmt"
 	"os"
 
+	"context"
 	"github.com/go-sql-driver/mysql"
 	"github.com/jamf/go-mysqldump"
-	"github.com/pibblokto/backlokto/pkg/types"
+	"github.com/pibblokto/backlokto-worker/pkg/types"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/homedir"
+	"log"
+	"path/filepath"
+	"strconv"
 )
 
 func MysqlDump(jobSpecs map[string]string, targets []map[string]string) {
 	// Open connection to database
 	var mysqlPass string
 	if jobSpecs["passwordSecretName"] != "" {
-		// Load in-cluster Kubernetes config
+		// In-cluster configuration
 		config, err := rest.InClusterConfig()
 		if err != nil {
-			fmt.Println("Error loading in-cluster configuration:", err)
-			os.Exit(1)
+			// Fallback to local kubeconfig for testing purposes
+			kubeconfig := filepath.Join(homedir.HomeDir(), ".kube", "config")
+			config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
+			if err != nil {
+				log.Fatalf("Error creating config: %v", err)
+			}
 		}
 
-		// Create a Kubernetes clientset
 		clientset, err := kubernetes.NewForConfig(config)
 		if err != nil {
-			fmt.Println("Error creating Kubernetes client:", err)
-			os.Exit(1)
+			log.Fatalf("Error creating Kubernetes client: %v", err)
 		}
 
 		// Specify the namespace and secret name
-		namespace := os.Getenv("POD_NAMESPACE")
-		secretName := jobSpecs["passwordSecretName"]
 
-		// Get the secret
-		secret, err := clientset.CoreV1().Secrets(namespace).Get(secretName, metav1.GetOptions{})
+		secretName := jobSpecs["passwordSecretName"]
+		namespace := os.Getenv("POD_NAMESPACE")
+
+		secret, err := clientset.CoreV1().Secrets(namespace).Get(context.TODO(), secretName, metav1.GetOptions{})
 		if err != nil {
-			fmt.Println("Error getting secret:", err)
-			os.Exit(1)
+			log.Fatalf("Error retrieving secret: %v", err)
 		}
 
 		// Retrieve the password

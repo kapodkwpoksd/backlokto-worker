@@ -1,54 +1,47 @@
 package targets
 
 import (
-	"fmt"
 	"os"
-	"path"
-	"strconv"
-	"strings"
-	"time"
 
+	"context"
+	"fmt"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/pibblokto/backlokto/pkg/types"
+	"github.com/pibblokto/backlokto-worker/pkg/types"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/homedir"
+	"log"
+	"path/filepath"
 )
 
-func createFilename(oldName string) string {
-	filenameSlice := strings.Split(path.Base(oldName), ".")
-	return filenameSlice[0] + "_" + strconv.FormatInt(time.Now().Unix(), 10) + ".sql"
-}
-
-func S3Target(targetSpecs map[string]string, articats *types.Artifacts) {
-	// Extract values from target and artifacts struct
-
-	// Load in-cluster Kubernetes config
+func S3Target(targetSpecs map[string]string, artifacts *types.Artifacts) {
+	// In-cluster configuration
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		fmt.Println("Error loading in-cluster configuration:", err)
-		os.Exit(1)
+		// Fallback to local kubeconfig for testing purposes
+		kubeconfig := filepath.Join(homedir.HomeDir(), ".kube", "config")
+		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
+		if err != nil {
+			log.Fatalf("Error creating config: %v", err)
+		}
 	}
 
-	// Create a Kubernetes clientset
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		fmt.Println("Error creating Kubernetes client:", err)
-		os.Exit(1)
+		log.Fatalf("Error creating Kubernetes client: %v", err)
 	}
 
-	// Specify the namespace and secret name
 	namespace := os.Getenv("POD_NAMESPACE")
 	secretName := targetSpecs["secretName"]
 
-	// Get the secret
-	secret, err := clientset.CoreV1().Secrets(namespace).Get(secretName, metav1.GetOptions{})
+	secret, err := clientset.CoreV1().Secrets(namespace).Get(context.TODO(), secretName, metav1.GetOptions{})
 	if err != nil {
-		fmt.Println("Error getting secret:", err)
-		os.Exit(1)
+		log.Fatalf("Error retrieving secret: %v", err)
 	}
 
 	// Retrieve the access key and secret key from the secret
@@ -66,7 +59,7 @@ func S3Target(targetSpecs map[string]string, articats *types.Artifacts) {
 	var secret_key string = string(secretKey)
 	var aws_region string = targetSpecs["awsRegion"]
 	var bucket_name string = targetSpecs["bucketName"]
-	var filepath string = articats.Filepath
+	var filepath string = artifacts.Filepath
 
 	// Create an S3 session
 	sess, err := session.NewSession(&aws.Config{
@@ -89,8 +82,8 @@ func S3Target(targetSpecs map[string]string, articats *types.Artifacts) {
 	// Create an S3 uploader
 	uploader := s3.New(sess)
 	var trailing_slash string = ""
-	if target.S3BucketKey != "" {
-		if target.S3BucketKey[len(target.S3BucketKey)-1] != '/' {
+	if targetSpecs["bucketKey"] != "" {
+		if targetSpecs["bucketKey"][len(targetSpecs["bucketKey"])-1] != '/' {
 			trailing_slash = "/"
 		}
 	}
@@ -99,7 +92,7 @@ func S3Target(targetSpecs map[string]string, articats *types.Artifacts) {
 	newFilename := createFilename(file.Name())
 	_, err = uploader.PutObject(&s3.PutObjectInput{
 		Bucket: aws.String(bucket_name),
-		Key:    aws.String(target.S3BucketKey + trailing_slash + newFilename),
+		Key:    aws.String(targetSpecs["bucketKey"] + trailing_slash + newFilename),
 		Body:   file,
 	})
 	if err != nil {

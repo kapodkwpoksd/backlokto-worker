@@ -6,5 +6,6 @@ import (
 )
 
 var TargetsMap = map[string]func(map[string]string, *types.Artifacts){
-	"s3": targets.S3Target,
+	"s3":  targets.S3Target,
+	"gcs": targets.GcsTarget,
 }
