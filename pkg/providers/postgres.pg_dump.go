@@ -1,11 +1,8 @@
 package providers
 
 import (
-	"fmt"
-	"os"
-
 	"context"
-	pg "github.com/habx/pg-commands"
+	"fmt"
 	"github.com/pibblokto/backlokto-worker/pkg/types"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -13,8 +10,10 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 	"log"
+	"os"
+	"os/exec"
 	"path/filepath"
-	"strconv"
+	"time"
 )
 
 func PostgresPgDump(jobSpecs map[string]string, targets []map[string]string) {
@@ -49,6 +48,7 @@ func PostgresPgDump(jobSpecs map[string]string, targets []map[string]string) {
 
 		// Retrieve the password
 		dbPassword, dbPasswordKeyExists := secret.Data["dbPassword"]
+		fmt.Printf("db password in secret %s is: %s\n", secretName, dbPassword)
 
 		// Check if both keys exist in the secret
 		if !dbPasswordKeyExists {
@@ -61,35 +61,39 @@ func PostgresPgDump(jobSpecs map[string]string, targets []map[string]string) {
 	}
 	pgUsername := jobSpecs["dbUsername"]
 	pgHost := jobSpecs["dbHost"]
-	pgPort, _ := strconv.Atoi(jobSpecs["dbPort"])
+	pgPort := jobSpecs["dbPort"]
 	pgDatabase := jobSpecs["dbDatabase"]
 
-	dump, err := pg.NewDump(&pg.Postgres{
-		Host:     pgHost,
-		Port:     pgPort,
-		DB:       pgDatabase,
-		Username: pgUsername,
-		Password: pgPass,
-	})
+	// Get the current timestamp
+	now := time.Now()
+	timestamp := now.Format("0402150206")
+	filename := fmt.Sprintf("%s_%s.dump", pgDatabase, timestamp)
 
-	if err != nil {
-		fmt.Println(err)
-	}
+	cmd := exec.Command("pg_dump",
+		"-U", pgUsername,
+		"-h", pgHost,
+		"-p", pgPort,
+		"-d", pgDatabase,
+		"-F", "p", // custom format
+		"-f", filename) // output file
 
-	dump.SetFileName(fmt.Sprintf(`%v.sql`, dump.DB))
-	dump.SetupFormat("p")
+	// Set the environment variables for the command
+	os.Setenv("PGPASSWORD", pgPass)
+	//cmd.Env = append(os.Environ(), fmt.Sprintf("PGPASSWORD=%s", pgPass))
 
-	dumpExec := dump.Exec(pg.ExecOptions{StreamPrint: true})
-	if dumpExec.Error != nil {
-		fmt.Println(dumpExec.Error.Err)
-		fmt.Println(dumpExec.Output)
+	// Set the environment variable for the password if necessary
+
+	// Execute the command
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("failed to dump database: %v", err)
 	} else {
-		fmt.Printf("Dump was succesfull. Filename: %s\n", dumpExec.File)
-		fmt.Println(dumpExec.File)
+		fmt.Println("Database dump created successfully:", filename)
 	}
 
 	artifacts := types.NewArtifacts()
-	artifacts.Filepath = dumpExec.File
+	artifacts.Filepath = fmt.Sprintf(filename, pgDatabase, timestamp)
 
 	if targets != nil {
 		for _, target := range targets {
